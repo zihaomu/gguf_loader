@@ -1,0 +1,14 @@
+# IDE / OS
+.cache/
+.ccls-cache/
+.direnv/
+.DS_Store
+.envrc
+.idea/
+.swiftpm
+.vs/
+.vscode/
+
+.build/
+build*
+cmake-build-*
