@@ -8,7 +8,10 @@
 .swiftpm
 .vs/
 .vscode/
+nppBackup
 
+.DS_Store
 .build/
 build*
 cmake-build-*
+._*

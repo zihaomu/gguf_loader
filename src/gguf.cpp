@@ -1,5 +1,5 @@
 #include "ggml.h"
-// #include "ggml-backend.h"
+#include "ggml-backend.h"
 #include "ggml-impl.h"
 #include "gguf.h"
 

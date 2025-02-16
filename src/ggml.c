@@ -1,7 +1,7 @@
 #define _CRT_SECURE_NO_DEPRECATE // Disables "unsafe" warnings on Windows
 #define _USE_MATH_DEFINES // For M_PI on MSVC
 
-// #include "ggml-backend.h"
+#include "ggml-backend.h"
 #include "ggml-impl.h"
 #include "ggml-threading.h"
 #include "ggml.h"
@@ -1405,7 +1405,6 @@ static inline bool ggml_can_repeat_rows(const struct ggml_tensor * t0, const str
 struct ggml_context * ggml_init(struct ggml_init_params params) {
     static bool is_first_call = true;
 
-    // MTODO: make this thread-safe
     ggml_critical_section_start();
 
     if (is_first_call) {
