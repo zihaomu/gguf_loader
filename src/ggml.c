@@ -1,7 +1,6 @@
 #define _CRT_SECURE_NO_DEPRECATE // Disables "unsafe" warnings on Windows
 #define _USE_MATH_DEFINES // For M_PI on MSVC
 
-#include "ggml-backend.h"
 #include "ggml-impl.h"
 #include "ggml-threading.h"
 #include "ggml.h"
@@ -6028,6 +6027,33 @@ void ggml_graph_cpy(struct ggml_cgraph * src, struct ggml_cgraph * dst) {
     }
 }
 
+// memory allocation
+static void memory_alloc(void ** ptr, size_t size) {
+    *ptr = malloc(size);
+    GGML_ASSERT(*ptr != NULL && "memory allocation failed");
+}
+
+void tensor_memset(struct ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
+    // GGML_ASSERT(0 && "memset_tensor was not supported!");
+    memset((char *) tensor->data + offset, value, size);
+    // memset((char *)tensor->data + offset, value, size);
+}
+
+void tensor_set(struct ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+    memcpy((char *) tensor->data + offset, data, size);
+}
+
+void tensor_get(const struct ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+    GGML_ASSERT(tensor->data && "tensor_get was not supported!");
+    memcpy(data, (char *) tensor->data + offset, size);
+}
+
+void ggml_backend_buffer_free(struct ggml_backend_buffer_t buffer) {
+    if (buffer.data) {
+        free(buffer.data);
+    }
+}
+
 struct ggml_cgraph * ggml_graph_dup(struct ggml_context * ctx, struct ggml_cgraph * cgraph) {
     struct ggml_cgraph * result = ggml_new_graph_custom(ctx, cgraph->size, cgraph->grads != NULL);
     ggml_graph_cpy(cgraph, result);
@@ -6039,7 +6065,7 @@ struct ggml_tensor * ggml_set_zero(struct ggml_tensor * tensor) {
         return tensor;
     }
     if (tensor->buffer) {
-        ggml_backend_tensor_memset(tensor, 0, 0, ggml_nbytes(tensor));
+        tensor_memset(tensor, 0, 0, ggml_nbytes(tensor));
     } else {
         GGML_ASSERT(tensor->data);
         memset(tensor->data, 0, ggml_nbytes(tensor));
@@ -6068,7 +6094,7 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
 
                 const float onef = 1.0f;
                 if (grad_acc->buffer) {
-                    ggml_backend_tensor_set(grad_acc, &onef, 0, sizeof(float));
+                    tensor_set(grad_acc, &onef, 0, sizeof(float));
                 } else {
                     GGML_ASSERT(grad_acc->data);
                     *((float *) grad_acc->data) = onef;

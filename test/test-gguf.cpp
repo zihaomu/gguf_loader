@@ -1,5 +1,5 @@
 #include "ggml.h"
-#include "ggml-backend.h"
+// #include "ggml-backend.h"
 #include "../src/ggml-impl.h"
 
 #include <algorithm>
@@ -801,7 +801,93 @@ struct random_gguf_context_result {
     ggml_backend_buffer_t buffer;
 };
 
-static struct random_gguf_context_result get_random_gguf_context(ggml_backend_t backend, const unsigned int seed) {
+static bool alloc_tensor_range(struct ggml_context * ctx,
+        struct ggml_tensor * first, struct ggml_tensor * last, size_t size,
+        ggml_backend_buffer_t ** buffers, size_t * n_buffers) {
+    // ggml_backend_buffer_t buffer = ggml_backend_buft_alloc_buffer(buft, size);
+//     if (buffer == NULL) {
+// #ifndef NDEBUG
+//         GGML_LOG_DEBUG("%s: failed to allocate %s buffer of size %zu\n", __func__, ggml_backend_buft_name(buft), size);
+// #endif
+//         for (size_t i = 0; i < *n_buffers; i++) {
+//             ggml_backend_buffer_free((*buffers)[i]);
+//         }
+//         free(*buffers);
+//         return false;
+//     }
+
+    // struct ggml_tallocr tallocr = ggml_tallocr_new(buffer);
+    char* p = (char*)malloc(size);
+    GGML_ASSERT(p && "malloc failed!!");
+    char* pp = p;
+    for (struct ggml_tensor * t = first; t != last; t = ggml_get_next_tensor(ctx, t)) {
+        if (t->data == NULL) {
+            t->data = pp;
+            pp += ggml_nbytes(t);
+        } else {
+            GGML_ASSERT(0 && "tensor already has data");
+        }
+    }
+
+    // *buffers = realloc(*buffers, sizeof(ggml_backend_buffer_t) * (*n_buffers + 1));
+    // (*buffers)[(*n_buffers)++] = buffer;
+
+    return true;
+}
+
+void ggml_backend_alloc_ctx_tensors(struct ggml_context * ctx)
+{
+    GGML_ASSERT(ggml_get_no_alloc(ctx) == true);
+
+    // size_t alignment = ggml_backend_buft_get_alignment(buft);
+    // size_t max_size = ggml_backend_buft_get_max_size(buft);
+
+    ggml_backend_buffer_t * buffers = NULL;
+    size_t n_buffers = 0;
+
+    size_t cur_buf_size = 0;
+    struct ggml_tensor * first = ggml_get_first_tensor(ctx);
+    const int alignment = 128;
+
+    for (struct ggml_tensor * t = first; t != NULL; t = ggml_get_next_tensor(ctx, t))
+    {
+        size_t this_size = 0;
+        if (t->data == NULL && t->view_src == NULL)
+        {
+            this_size = GGML_PAD(ggml_nbytes(t), alignment);
+        }
+
+        if (cur_buf_size > 0 && (cur_buf_size + this_size) > SIZE_MAX)
+        {
+            return;
+            // // allocate tensors in the current buffer
+            // if (!alloc_tensor_range(ctx, first, t, buft, cur_buf_size, &buffers, &n_buffers))
+            // {
+            //     return NULL;
+            // }
+            first = t;
+            cur_buf_size = this_size;
+        } else {
+            cur_buf_size += this_size;
+        }
+    }
+
+    // allocate remaining tensors
+    if (cur_buf_size > 0) {
+        if (!alloc_tensor_range(ctx, first, NULL, cur_buf_size, &buffers, &n_buffers)) {
+            return;
+        }
+    }
+
+    if (n_buffers == 0) {
+#ifndef NDEBUG
+        GGML_LOG_DEBUG("%s: all tensors in the context are already allocated\n", __func__);
+#endif
+        return;
+    }
+}
+
+static struct random_gguf_context_result get_random_gguf_context(const unsigned int seed) {
     std::mt19937 rng(seed);
 
     struct gguf_context * gguf_ctx = gguf_init_empty();
@@ -901,14 +987,16 @@ static struct random_gguf_context_result get_random_gguf_context(ggml_backend_t 
         ggml_set_name(tensor, name.c_str());
     }
 
-    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
+    ggml_backend_alloc_ctx_tensors(ctx);
+    // ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
+    ggml_backend_buffer_t buf = {};
     for (struct ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
         const size_t nbytes = ggml_nbytes(t);
         std::vector<uint32_t> random_data((nbytes + sizeof(uint32_t) - 1) / sizeof(uint32_t));
         for (size_t j = 0; j < random_data.size(); ++j) {
             random_data[j] = rng();
         }
-        ggml_backend_tensor_set(t, random_data.data(), 0, nbytes);
+        tensor_set(t, random_data.data(), 0, nbytes);
 
         gguf_add_tensor(gguf_ctx, t);
     }
@@ -1049,7 +1137,9 @@ static bool same_tensor_data(const struct ggml_context * orig, const struct ggml
             break;
         }
         std::vector<char> data_orig(nbytes);
-        ggml_backend_tensor_get(t_orig, data_orig.data(), 0, nbytes);
+
+        tensor_get(t_orig, data_orig.data(), 0, nbytes);
+
         if (!std::equal(data_orig.data(), data_orig.data() + nbytes, reinterpret_cast<const char *>(t_read->data))) {
             ok = false;
         }
@@ -1064,10 +1154,10 @@ static bool same_tensor_data(const struct ggml_context * orig, const struct ggml
     return ok;
 }
 
-static std::pair<int, int> test_roundtrip(ggml_backend_dev_t dev, const unsigned int seed, const bool only_meta) {
-    ggml_backend_t backend = ggml_backend_dev_init(dev, nullptr);
-    printf("%s: device=%s, backend=%s, only_meta=%s\n",
-        __func__, ggml_backend_dev_description(dev), ggml_backend_name(backend), only_meta ? "yes" : "no");
+static std::pair<int, int> test_roundtrip(const unsigned int seed, const bool only_meta) {
+    // ggml_backend_t backend = ggml_backend_dev_init(dev, nullptr);
+    // printf("%s: device=%s, backend=%s, only_meta=%s\n",
+    //     __func__, ggml_backend_dev_description(dev), ggml_backend_name(backend), only_meta ? "yes" : "no");
 
     int npass = 0;
     int ntest = 0;
@@ -1076,7 +1166,7 @@ static std::pair<int, int> test_roundtrip(ggml_backend_dev_t dev, const unsigned
     struct ggml_context * ctx_0;
     ggml_backend_buffer_t bbuf;
     {
-        struct random_gguf_context_result result = get_random_gguf_context(backend, seed);
+        struct random_gguf_context_result result = get_random_gguf_context(seed);
         gguf_ctx_0 = result.gguf_ctx;
         ctx_0      = result.ctx;
         bbuf       = result.buffer;
@@ -1187,16 +1277,16 @@ static std::pair<int, int> test_roundtrip(ggml_backend_dev_t dev, const unsigned
     ggml_free(ctx_1);
     gguf_free(gguf_ctx_0);
     gguf_free(gguf_ctx_1);
-    ggml_backend_free(backend);
+    // ggml_backend_free(backend);
     fclose(file);
 
     printf("\n");
     return std::make_pair(npass, ntest);
 }
 
-static std::pair<int, int> test_gguf_set_kv(ggml_backend_dev_t dev, const unsigned int seed) {
-    ggml_backend_t backend = ggml_backend_dev_init(dev, nullptr);
-    printf("%s: device=%s, backend=%s\n", __func__, ggml_backend_dev_description(dev), ggml_backend_name(backend));
+static std::pair<int, int> test_gguf_set_kv(const unsigned int seed) {
+    // ggml_backend_t backend = ggml_backend_dev_init(dev, nullptr);
+    // printf("%s: device=%s, backend=%s\n", __func__, ggml_backend_dev_description(dev), ggml_backend_name(backend));
 
     int npass = 0;
     int ntest = 0;
@@ -1205,7 +1295,7 @@ static std::pair<int, int> test_gguf_set_kv(ggml_backend_dev_t dev, const unsign
     struct ggml_context * ctx_0;
     ggml_backend_buffer_t bbuf_0;
     {
-        struct random_gguf_context_result result = get_random_gguf_context(backend, seed);
+        struct random_gguf_context_result result = get_random_gguf_context(seed);
         gguf_ctx_0 = result.gguf_ctx;
         ctx_0      = result.ctx;
         bbuf_0     = result.buffer;
@@ -1215,7 +1305,7 @@ static std::pair<int, int> test_gguf_set_kv(ggml_backend_dev_t dev, const unsign
     struct ggml_context * ctx_1;
     ggml_backend_buffer_t bbuf_1;
     {
-        struct random_gguf_context_result result = get_random_gguf_context(backend, seed + 1);
+        struct random_gguf_context_result result = get_random_gguf_context(seed + 1);
         gguf_ctx_1 = result.gguf_ctx;
         ctx_1      = result.ctx;
         bbuf_1     = result.buffer;
@@ -1280,7 +1370,7 @@ static std::pair<int, int> test_gguf_set_kv(ggml_backend_dev_t dev, const unsign
     gguf_free(gguf_ctx_0);
     gguf_free(gguf_ctx_1);
     gguf_free(gguf_ctx_2);
-    ggml_backend_free(backend);
+    // ggml_backend_free(backend);
 
     printf("\n");
     return std::make_pair(npass, ntest);
@@ -1301,7 +1391,7 @@ int main(int argc, char ** argv) {
     const unsigned int seed = argc < 2 ? rd() : std::stoi(argv[1]);
 
     // Initialize ggml backends early so the prints aren't interleaved with the test results:
-    ggml_backend_dev_count();
+    // ggml_backend_dev_count();
     fprintf(stderr, "\n");
 
     int npass = 0;
@@ -1312,17 +1402,18 @@ int main(int argc, char ** argv) {
         ntest += result.second;
     }
 
-    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
-        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+    // for (size_t i = 0; i < ggml_backend_dev_count(); ++i)
+    {
+        // ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 
         for (bool only_meta : {true, false}) {
-            std::pair<int, int> result = test_roundtrip(dev, seed, only_meta);
+            std::pair<int, int> result = test_roundtrip(seed, only_meta);
             npass += result.first;
             ntest += result.second;
         }
 
         {
-            std::pair<int, int> result = test_gguf_set_kv(dev, seed);
+            std::pair<int, int> result = test_gguf_set_kv(seed);
             npass += result.first;
             ntest += result.second;
         }

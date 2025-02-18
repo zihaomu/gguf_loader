@@ -1,5 +1,5 @@
 #include "ggml.h"
-#include "ggml-backend.h"
+// #include "ggml-backend.h"
 #include "ggml-impl.h"
 #include "gguf.h"
 
@@ -1250,7 +1250,7 @@ struct gguf_writer {
 
         buf.resize(offset + nbytes);
         if (info.t.buffer) {
-            ggml_backend_tensor_get(&info.t, buf.data() + offset, 0, nbytes);
+            tensor_get(&info.t, buf.data() + offset, 0, nbytes);
         } else {
             GGML_ASSERT(info.t.data);
             memcpy(buf.data() + offset, info.t.data, nbytes);

@@ -173,6 +173,11 @@
 //
 //
 
+// define GGML_USE_CPU
+#ifndef GGML_USE_CPU
+#define GGML_USE_CPU 1
+#endif
+
 #ifdef GGML_SHARED
 #    if defined(_WIN32) && !defined(__MINGW32__)
 #        ifdef GGML_BUILD
@@ -572,11 +577,18 @@ extern "C" {
         bool   no_alloc;   // don't allocate memory for the tensor data
     };
 
+    struct ggml_backend_buffer_t {
+        size_t size;
+        void * data;
+    };
+
+    void ggml_backend_buffer_free(struct ggml_backend_buffer_t buffer);
+
     // n-dimensional tensor
     struct ggml_tensor {
         enum ggml_type type;
 
-        struct ggml_backend_buffer * buffer;
+        struct ggml_backend_buffer_t * buffer;
 
         int64_t ne[GGML_MAX_DIMS]; // number of elements
         size_t  nb[GGML_MAX_DIMS]; // stride in bytes:
@@ -606,6 +618,11 @@ extern "C" {
 
         char padding[8];
     };
+
+    // Undefine the macros to avoid redefinition
+    void tensor_set(struct ggml_tensor * tensor, const void * data, size_t offset, size_t size);
+    void tensor_memset(struct ggml_tensor * tensor, uint8_t value, size_t offset, size_t size);
+    void tensor_get(const struct ggml_tensor * tensor, void * data, size_t offset, size_t size);
 
     static const size_t GGML_TENSOR_SIZE = sizeof(struct ggml_tensor);
 
